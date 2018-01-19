@@ -8,4 +8,8 @@
     <color name="colorOverlay">#b88ec4</color>
     <color name="colorNeutral">#f2f2f2</color>
     <color name="colorDark">#363333</color>
+    <color name="colorHappy">#1BC771</color>
+    <color name="lightGray">#33303030</color>
+
+    <color name="colorAccentTransparent">#33F16122</color>
 </resources>

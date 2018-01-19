@@ -1,8 +1,9 @@
 package nl.inholland.imready.service.mock;
 
-import nl.inholland.imready.service.model.Client;
-import nl.inholland.imready.service.model.FutureplanResponse;
 import io.reactivex.Single;
+import nl.inholland.imready.service.model.Client;
+import nl.inholland.imready.service.model.EmptyResponse;
+import nl.inholland.imready.service.model.PutClientActivityModel;
 import nl.inholland.imready.service.rest.ClientService;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
@@ -17,7 +18,7 @@ class MockClientService implements ClientService {
 
     @Override
     public Single<ResponseBody> getFuturePlan(String clientId) {
-        return delegate.returningResponse(null).getFuturePlan(clientId);
+        return delegate.returningResponse(new EmptyResponse()).getFuturePlan(clientId);
     }
 
     @Override
@@ -26,7 +27,17 @@ class MockClientService implements ClientService {
     }
 
     @Override
+    public Single<ResponseBody> getClientInfo(String clientId) {
+        return delegate.returningResponse(new EmptyResponse()).getClientInfo(clientId);
+    }
+
+    @Override
     public Call<Client> getClient(String clientId) {
         return null;
+    }
+
+    @Override
+    public Call<Void> putActivity(String clientId, String activityId, PutClientActivityModel model) {
+        return delegate.returningResponse(null).putActivity(clientId, activityId, model);
     }
 }

@@ -1,15 +1,14 @@
 package nl.inholland.imready.app.view.activity.client;
 
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.os.PersistableBundle;
 import android.support.v4.widget.DrawerLayout;
+import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.ActionBarDrawerToggle;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
-import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -18,30 +17,17 @@ import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.GridView;
 import android.widget.TextView;
-import android.widget.Toast;
-
-import com.nytimes.android.external.store3.base.impl.BarCode;
-import com.nytimes.android.external.store3.base.impl.Store;
 
 import org.greenrobot.eventbus.EventBus;
-import org.greenrobot.eventbus.Subscribe;
-import org.greenrobot.eventbus.ThreadMode;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import br.com.zbra.androidlinq.Stream;
-import io.reactivex.Single;
-import io.reactivex.SingleObserver;
-import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.disposables.Disposable;
-import io.reactivex.schedulers.Schedulers;
 import nl.inholland.imready.R;
 import nl.inholland.imready.app.ImReadyApplication;
-import nl.inholland.imready.app.logic.PreferenceConstants;
-import nl.inholland.imready.app.logic.events.FutureplanChangedEvent;
-import nl.inholland.imready.app.logic.events.PersonalBlockLoadedEvent;
-import nl.inholland.imready.app.persistence.UserCache;
+import nl.inholland.imready.app.logic.events.BlockDetailViewEvent;
+import nl.inholland.imready.app.presenter.client.ClientHomePresenter;
+import nl.inholland.imready.app.presenter.client.ClientHomePresenterImpl;
 import nl.inholland.imready.app.view.ParcelableConstants;
 import nl.inholland.imready.app.view.activity.LoginActivity;
 import nl.inholland.imready.app.view.activity.shared.MessagesActivity;
@@ -51,14 +37,14 @@ import nl.inholland.imready.model.blocks.Component;
 import nl.inholland.imready.model.blocks.PersonalActivity;
 import nl.inholland.imready.model.blocks.PersonalBlock;
 import nl.inholland.imready.model.blocks.PersonalComponent;
-import nl.inholland.imready.model.enums.BlockPartStatus;
 import nl.inholland.imready.model.enums.BlockType;
-import nl.inholland.imready.model.enums.UserRole;
-import nl.inholland.imready.service.model.FutureplanResponse;
+import nl.inholland.imready.model.user.Client;
+import nl.inholland.imready.model.user.User;
+import nl.inholland.imready.util.ColorUtil;
 
 import static br.com.zbra.androidlinq.Linq.stream;
 
-public class ClientHomeActivity extends AppCompatActivity implements View.OnClickListener, AdapterView.OnItemClickListener, SingleObserver<FutureplanResponse> {
+public class ClientHomeActivity extends AppCompatActivity implements View.OnClickListener, AdapterView.OnItemClickListener, ClientHomeView {
 
     private static final String STATE_POPUP = "popup";
 
@@ -67,26 +53,34 @@ public class ClientHomeActivity extends AppCompatActivity implements View.OnClic
     private PersonalBlockAdapter gridAdapter;
 
     private boolean popupShown;
+    private SwipeRefreshLayout refreshLayout;
+    private ClientHomePresenter presenter;
+    private TextView pointsView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_client_home);
 
+        pointsView = findViewById(R.id.points_text);
+
         initGridView();
+        initRefresh();
         initToolbarAndDrawer();
+
+        ImReadyApplication instance = ImReadyApplication.getInstance();
+        presenter = new ClientHomePresenterImpl(this, instance.getFutureplanStore(), instance.getClientStore());
+
+        if (savedInstanceState != null) {
+            popupShown = savedInstanceState.getBoolean(STATE_POPUP);
+        }
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        EventBus.getDefault().register(this);
-        initData(false);
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
+        presenter.init();
+        presenter.getUserInformation();
     }
 
     @Override
@@ -96,65 +90,29 @@ public class ClientHomeActivity extends AppCompatActivity implements View.OnClic
     }
 
     @Override
-    protected void onStop() {
-        super.onStop();
-        EventBus.getDefault().unregister(this);
-    }
-
-    @Override
     public void onSaveInstanceState(Bundle outState, PersistableBundle outPersistentState) {
         super.onSaveInstanceState(outState, outPersistentState);
         outState.putBoolean(STATE_POPUP, popupShown);
     }
 
     @Override
-    protected void onRestoreInstanceState(Bundle savedInstanceState) {
-        super.onRestoreInstanceState(savedInstanceState);
-        popupShown = savedInstanceState.getBoolean(STATE_POPUP);
-    }
-
-    @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.app_bar_home, menu);
+
         TextView userText = findViewById(R.id.username);
-
-        SharedPreferences settings = getSharedPreferences(PreferenceConstants.FILE, MODE_PRIVATE);
-        String username = settings.getString(PreferenceConstants.USER_NAME, getString(R.string.default_username));
+        String username = presenter.getUsername();
         userText.setText(username);
+
+        // color menu items
+        MenuItem refreshItem = menu.findItem(R.id.refresh);
+        ColorUtil.tintMenuIcon(this, refreshItem, android.R.color.white);
+        MenuItem messagesItem = menu.findItem(R.id.messages);
+        ColorUtil.tintMenuIcon(this, messagesItem, android.R.color.white);
+        MenuItem notificationsItem = menu.findItem(R.id.notifications);
+        ColorUtil.tintMenuIcon(this, notificationsItem, android.R.color.white);
+
         return super.onCreateOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.messages:
-                gotoMessages();
-                return true;
-            case R.id.notifications:
-                gotoNotifications();
-                return true;
-            default:
-                return super.onOptionsItemSelected(item);
-        }
-    }
-
-    @Override
-    public void onClick(View view) {
-        switch (view.getId()) {
-            case R.id.drawer_messages:
-                gotoMessages();
-                break;
-            case R.id.drawer_family:
-                gotoFamily();
-                break;
-            case R.id.drawer_info:
-                gotoInfo();
-                break;
-            case R.id.logout:
-                logout();
-                break;
-        }
     }
 
     private void initGridView() {
@@ -167,8 +125,8 @@ public class ClientHomeActivity extends AppCompatActivity implements View.OnClic
     private void initToolbarAndDrawer() {
         // Toolbar
         Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
         toolbar.setTitle(R.string.futureplan);
+        setSupportActionBar(toolbar);
 
         // Drawer
         drawer = findViewById(R.id.drawer);
@@ -189,111 +147,152 @@ public class ClientHomeActivity extends AppCompatActivity implements View.OnClic
         logoutButton.setOnClickListener(this);
     }
 
-    private void initData(boolean fetchFromNetword) {
-        ImReadyApplication instance = ImReadyApplication.getInstance();
-        UserCache cache = instance.getCache(UserRole.CLIENT);
-        Store<FutureplanResponse, BarCode> store = instance.getFutureplanStore();
-
-        // cache request param, where type is the key for the cache and key the unique identifier
-        BarCode request = new BarCode("future_plan", cache.getUserId());
-
-        // request data from the futureplan store
-        Single<FutureplanResponse> dataRequest;
-        if (fetchFromNetword) {
-            // get data from network
-            dataRequest = store.fetch(request);
-        } else {
-            // get data from disk and store it in-memory
-            // if data is not present it does a network call to retrieve the data from online
-            dataRequest = store.get(request);
-        }
-
-        dataRequest
-            // required to pass the data to views (ui changes are required to be on the main thread)
-            .subscribeOn(Schedulers.io())
-            .observeOn(AndroidSchedulers.mainThread())
-            // callback implementation (onSucces / onFailure)
-            .subscribe(this);
+    private void initRefresh() {
+        refreshLayout = findViewById(R.id.pull_refresh);
+        refreshLayout.setOnRefreshListener(this::refreshData);
     }
 
-    private void gotoMessages() {
+    private void refreshData() {
+        presenter.refresh();
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.messages:
+                goToMessages();
+                return true;
+            case R.id.notifications:
+                goToNotifications();
+                return true;
+            case R.id.refresh:
+                refreshData();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+
+    @Override
+    public void onClick(View view) {
+        switch (view.getId()) {
+            case R.id.drawer_messages:
+                goToMessages();
+                break;
+            case R.id.drawer_family:
+                goToFamily();
+                break;
+            case R.id.drawer_info:
+                goToInfo();
+                break;
+            case R.id.logout:
+                presenter.logout();
+                break;
+        }
+    }
+
+    @Override
+    public void onItemClick(AdapterView<?> adapterView, View view, int position, long id) {
+        if (!refreshLayout.isRefreshing()) {
+            PersonalBlock block = (PersonalBlock) adapterView.getItemAtPosition(position);
+            if (block.getBlock().getType() == BlockType.ADD) {
+                goToEditFutureplan();
+            } else {
+                goToBlockInfo(block);
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == ClientFutureplanEditActivity.COMPONENT_ADD_REQUEST) {
+            if (resultCode == RESULT_OK) {
+                // componennt was added in ClientFutureplanEditActivity and so data needs to be reloaded
+                refreshData();
+            }
+        }
+    }
+
+    @Override
+    public void goToMessages() {
         Intent intent = new Intent(this, MessagesActivity.class);
         startActivity(intent);
     }
 
-    private void gotoNotifications() {
-        Toast.makeText(this, "Soon!", Toast.LENGTH_SHORT).show();
+    @Override
+    public void goToNotifications() {
+        showMessage("Soon!");
     }
 
-    private void gotoFamily() {
-        Toast.makeText(this, "Soon!", Toast.LENGTH_SHORT).show();
+    @Override
+    public void goToFamily() {
+        Intent intent = new Intent(this, ClientCaretakersActivity.class);
+        startActivity(intent);
     }
 
-    private void gotoInfo() {
-        Toast.makeText(this, "Soon!", Toast.LENGTH_SHORT).show();
+    @Override
+    public void goToInfo() {
+        showMessage("Soon!");
     }
 
-    private void logout() {
+    @Override
+    public void goToBlockInfo(PersonalBlock block) {
+        Intent intent = new Intent(this, ClientBlockDetailsActivity.class);
+        EventBus.getDefault().postSticky(new BlockDetailViewEvent(block, null));
+        startActivity(intent);
+    }
+
+    @Override
+    public void goToEditFutureplan() {
+        Intent intent = new Intent(this, ClientFutureplanEditActivity.class);
+        List<PersonalBlock> personalBlocks = gridAdapter.getData();
+        List<String> componentIds = stream(personalBlocks)
+                .selectMany(PersonalBlock::getComponents)
+                .select(PersonalComponent::getComponent)
+                .select(Component::getId)
+                .toList();
+        // pass in a list of component id's which tells the next view what options to disable
+        intent.putStringArrayListExtra(ParcelableConstants.COMPONENT, (ArrayList<String>) componentIds);
+        startActivityForResult(intent, ClientFutureplanEditActivity.COMPONENT_ADD_REQUEST);
+    }
+
+    @Override
+    public void updateUserInfo(User user) {
+        Client client = (Client) user;
+        pointsView.setText(String.valueOf(client.getPoints()));
+    }
+
+    @Override
+    public void showRefreshing() {
+        refreshLayout.setRefreshing(true);
+    }
+
+    @Override
+    public void stopRefreshing() {
+        refreshLayout.setRefreshing(false);
+    }
+
+    @Override
+    public void goToLogin() {
         Intent intent = new Intent(this, LoginActivity.class);
         startActivity(intent);
         finish();
     }
 
     @Override
-    public void onItemClick(AdapterView<?> adapterView, View view, int position, long id) {
-        PersonalBlock block = (PersonalBlock) adapterView.getItemAtPosition(position);
-        if (block.getBlock().getType() == BlockType.ADD) {
-            Intent intent = new Intent(this, ClientFutureplanEditActivity.class);
-            List<PersonalBlock> personalBlocks = gridAdapter.getData();
-            List<String> componentIds = stream(personalBlocks)
-                    .selectMany(PersonalBlock::getComponents)
-                    .select(PersonalComponent::getComponent)
-                    .select(Component::getId)
-                    .toList();
-            // pass in a list of component id's which tells the next view what options to disable
-            intent.putStringArrayListExtra(ParcelableConstants.COMPONENT, (ArrayList<String>) componentIds);
-            startActivity(intent);
-        } else {
-            Intent intent = new Intent(this, ClientBlockDetailsActivity.class);
-            intent.putExtra(ParcelableConstants.BLOCK, block);
-            startActivity(intent);
-        }
-    }
+    public void setViewData(List<PersonalBlock> data) {
+        gridAdapter.setData(data);
 
-    @Subscribe(threadMode = ThreadMode.MAIN)
-    public void onPersonalBlockLoadedEvent(PersonalBlockLoadedEvent event) {
-        Stream<PersonalComponent> components = stream(event.blocks).selectMany(PersonalBlock::getComponents);
-        Stream<PersonalActivity> activities = components.selectMany(PersonalComponent::getActivities);
-        List<PersonalActivity> todoSoon = activities.where(activity -> activity.getStatus() == BlockPartStatus.ONGOING).toList();
-
-        if (!todoSoon.isEmpty() && !popupShown) {
-            WelcomeDialogFragment dialogWelcome = new WelcomeDialogFragment();
-            Bundle bundle = new Bundle();
-            bundle.putParcelableArrayList(ParcelableConstants.TODO_ACTIVITIES, (ArrayList<? extends Parcelable>) todoSoon);
-            dialogWelcome.setArguments(bundle);
-            dialogWelcome.show(getSupportFragmentManager(), "welcome");
+        if (!popupShown) {
+            List<PersonalActivity> todo = presenter.getTodoActivities(data);
+            if (!todo.isEmpty()) {
+                WelcomeDialogFragment dialogWelcome = new WelcomeDialogFragment();
+                Bundle bundle = new Bundle();
+                bundle.putParcelableArrayList(ParcelableConstants.TODO_ACTIVITIES, (ArrayList<? extends Parcelable>) todo);
+                dialogWelcome.setArguments(bundle);
+                dialogWelcome.show(getSupportFragmentManager(), WelcomeDialogFragment.TAG);
+            }
         }
         popupShown = true;
-    }
-
-    @Subscribe(threadMode = ThreadMode.MAIN)
-    public void onFutureplanChanged(FutureplanChangedEvent event) {
-        initData(true);
-    }
-
-    @Override
-    public void onSubscribe(Disposable request) {
-        // ignore
-    }
-
-    @Override
-    public void onSuccess(FutureplanResponse response) {
-        gridAdapter.setData(response.getBlocks());
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-        Log.e(ClientHomeActivity.class.getSimpleName(), throwable.getMessage(), throwable);
-        Toast.makeText(this, R.string.personal_block_failed, Toast.LENGTH_SHORT).show();
     }
 }

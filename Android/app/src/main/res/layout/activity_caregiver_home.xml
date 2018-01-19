@@ -5,16 +5,20 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     tools:context="nl.inholland.imready.app.view.activity.caregiver.CaregiverHomeActivity">
-    <android.support.v7.widget.Toolbar
-        android:id="@+id/toolbar"
+    <!--<android.support.v7.widget.Toolbar-->
+        <!--android:id="@+id/toolbar"-->
+        <!--android:layout_width="match_parent"-->
+        <!--android:layout_height="?attr/actionBarSize"-->
+        <!--android:background="@color/colorAccent"-->
+        <!--android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"/>-->
+    <android.support.v4.widget.SwipeRefreshLayout
+        android:id="@+id/pull_refresh"
         android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="@color/colorAccent"
-        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"/>
-    <ListView
-        android:id="@+id/listview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        tools:listitem="@layout/list_item_client">
-    </ListView>
+        android:layout_height="wrap_content">
+        <ListView
+            android:id="@+id/listview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            tools:listitem="@layout/list_item_client"/>
+    </android.support.v4.widget.SwipeRefreshLayout>
 </LinearLayout>
